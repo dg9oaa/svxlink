@@ -9,7 +9,7 @@ to a remote host. See usage instructions in the class definition.
 
 \verbatim
 Async - A library for programming event driven applications
-Copyright (C) 2003-2015 Tobias Blomberg
+Copyright (C) 2003-2022 Tobias Blomberg
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -128,23 +128,27 @@ const char *TcpConnection::disconnectReasonStr(DisconnectReason reason)
   {
     case DR_HOST_NOT_FOUND:
       return "Host not found";
-      break;
 
     case DR_REMOTE_DISCONNECTED:
       return "Connection closed by remote peer";
-      break;
 
     case DR_SYSTEM_ERROR:
       return strerror(errno);
-      break;
 
     case DR_RECV_BUFFER_OVERFLOW:
       return "Receiver buffer overflow";
-      break;
 
     case DR_ORDERED_DISCONNECT:
       return "Locally ordered disconnect";
-      break;
+
+    case DR_PROTOCOL_ERROR:
+      return "Protocol error";
+
+    case DR_SWITCH_PEER:
+      return "Switch to higher priority peer";
+
+    case DR_BAD_STATE:
+      return "Connection in bad state";
   }
   
   return "Unknown disconnect reason";
@@ -165,39 +169,61 @@ const char *TcpConnection::disconnectReasonStr(DisconnectReason reason)
  *------------------------------------------------------------------------
  */
 TcpConnection::TcpConnection(size_t recv_buf_len)
-  : remote_port(0), recv_buf_len(recv_buf_len), sock(-1), rd_watch(0),
-    wr_watch(0), recv_buf(0), recv_buf_cnt(0)
+  : TcpConnection(-1, IpAddress(), 0, recv_buf_len)
 {
-  recv_buf = new char[recv_buf_len];
-  rd_watch = new FdWatch;
-  rd_watch->activity.connect(mem_fun(*this, &TcpConnection::recvHandler));
-  wr_watch = new FdWatch;
-  wr_watch->activity.connect(mem_fun(*this, &TcpConnection::writeHandler));
 } /* TcpConnection::TcpConnection */
 
 
 TcpConnection::TcpConnection(int sock, const IpAddress& remote_addr,
       	      	      	     uint16_t remote_port, size_t recv_buf_len)
   : remote_addr(remote_addr), remote_port(remote_port),
-    recv_buf_len(recv_buf_len), sock(sock), rd_watch(0), wr_watch(0),
+    recv_buf_len(recv_buf_len), sock(sock),
     recv_buf(0), recv_buf_cnt(0)
 {
   recv_buf = new char[recv_buf_len];
-  rd_watch = new FdWatch;
-  rd_watch->activity.connect(mem_fun(*this, &TcpConnection::recvHandler));
-  wr_watch = new FdWatch;
-  wr_watch->activity.connect(mem_fun(*this, &TcpConnection::writeHandler));
+  rd_watch.activity.connect(mem_fun(*this, &TcpConnection::recvHandler));
+  wr_watch.activity.connect(mem_fun(*this, &TcpConnection::writeHandler));
   setSocket(sock);
 } /* TcpConnection::TcpConnection */
 
 
 TcpConnection::~TcpConnection(void)
 {
-  disconnect();
+  closeConnection();
   delete [] recv_buf;
-  delete rd_watch;
-  delete wr_watch;
+  recv_buf = 0;
+  recv_buf_cnt = recv_buf_len = 0;
 } /* TcpConnection::~TcpConnection */
+
+
+TcpConnection& TcpConnection::operator=(TcpConnection&& other)
+{
+  //std::cout << "### TcpConnection::operator=(TcpConnection&&)" << std::endl;
+
+  remote_addr = other.remote_addr;
+  other.remote_addr.clear();
+
+  remote_port = other.remote_port;
+  other.remote_port = 0;
+
+  sock = other.sock;
+  other.sock = -1;
+
+  rd_watch = std::move(other.rd_watch);
+
+  wr_watch = std::move(other.wr_watch);
+
+  delete [] recv_buf;
+  recv_buf_len = other.recv_buf_len;
+  recv_buf = other.recv_buf;
+  recv_buf_cnt = other.recv_buf_cnt;
+
+  other.recv_buf_len = DEFAULT_RECV_BUF_LEN;
+  other.recv_buf = new char[other.recv_buf_len];
+  other.recv_buf_cnt = 0;
+
+  return *this;
+} /* TcpConnection::operator= */
 
 
 void TcpConnection::setRecvBufLen(size_t recv_buf_len)
@@ -215,36 +241,23 @@ void TcpConnection::setRecvBufLen(size_t recv_buf_len)
 } /* TcpConnection::setRecvBufLen */
 
 
-void TcpConnection::disconnect(void)
-{
-  recv_buf_cnt = 0;
-  
-  wr_watch->setEnabled(false);
-  rd_watch->setEnabled(false);
-
-  if (sock != -1)
-  {
-    close(sock);
-    sock = -1;  
-  }
-} /* TcpConnection::disconnect */
-
-
 int TcpConnection::write(const void *buf, int count)
 {
-  assert(sock != -1);
-  int cnt = ::write(sock, buf, count);
-  if (cnt == -1)
+  assert(sock >= 0);
+  int cnt = ::send(sock, buf, count, MSG_NOSIGNAL);
+  if (cnt < 0)
   {
-    int errno_tmp = errno;
-    disconnect();
-    errno = errno_tmp;
-    disconnected(this, DR_SYSTEM_ERROR);
+    if (errno != EAGAIN)
+    {
+      return -1;
+    }
+    cnt = 0;
   }
-  else if (cnt < count)
+
+  if (cnt < count)
   {
     sendBufferFull(true);
-    wr_watch->setEnabled(true);
+    wr_watch.setEnabled(true);
   }
   
   return cnt;
@@ -275,10 +288,10 @@ int TcpConnection::write(const void *buf, int count)
 void TcpConnection::setSocket(int sock)
 {
   this->sock = sock;
-  rd_watch->setFd(sock, FdWatch::FD_WATCH_RD);
-  rd_watch->setEnabled(true);
-  wr_watch->setEnabled(false);
-  wr_watch->setFd(sock, FdWatch::FD_WATCH_WR);
+  rd_watch.setFd(sock, FdWatch::FD_WATCH_RD);
+  rd_watch.setEnabled(sock >= 0);
+  wr_watch.setEnabled(false);
+  wr_watch.setFd(sock, FdWatch::FD_WATCH_WR);
 } /* TcpConnection::setSocket */
 
 
@@ -318,6 +331,21 @@ void TcpConnection::setRemotePort(uint16_t remote_port)
 } /* TcpConnection::setRemotePort */
 
 
+void TcpConnection::closeConnection(void)
+{
+  recv_buf_cnt = 0;
+
+  wr_watch.setEnabled(false);
+  rd_watch.setEnabled(false);
+
+  if (sock >= 0)
+  {
+    close(sock);
+    sock = -1;
+  }
+} /* TcpConnection::closeConnection */
+
+
 
 
 
@@ -347,8 +375,8 @@ void TcpConnection::recvHandler(FdWatch *watch)
   
   if (recv_buf_cnt == recv_buf_len)
   {
-    disconnect();
-    disconnected(this, DR_RECV_BUFFER_OVERFLOW);
+    closeConnection();
+    onDisconnected(DR_RECV_BUFFER_OVERFLOW);
     return;
   }
   
@@ -356,21 +384,21 @@ void TcpConnection::recvHandler(FdWatch *watch)
   if (cnt == -1)
   {
     int errno_tmp = errno;
-    disconnect();
+    closeConnection();
     errno = errno_tmp;
-    disconnected(this, DR_SYSTEM_ERROR);
+    onDisconnected(DR_SYSTEM_ERROR);
     return;
   }
   else if (cnt == 0)
   {
     //cout << "Connection closed by remote host!\n";
-    disconnect();
-    disconnected(this, DR_REMOTE_DISCONNECTED);
+    closeConnection();
+    onDisconnected(DR_REMOTE_DISCONNECTED);
     return;
   }
   
   recv_buf_cnt += cnt;
-  size_t processed = dataReceived(this, recv_buf, recv_buf_cnt);
+  size_t processed = onDataReceived(recv_buf, recv_buf_cnt);
   //cout << "processed=" << processed << endl;
   if (processed >= recv_buf_cnt)
   {

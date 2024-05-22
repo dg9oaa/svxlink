@@ -6,7 +6,7 @@
 
 \verbatim
 Async - A library for programming event driven applications
-Copyright (C) 2003-2015 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2024 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -133,7 +133,13 @@ class Pty : public sigc::trackable
      * @brief 	Destructor
      */
     ~Pty(void);
-  
+
+    void setLineBuffered(bool line_buffered)
+    {
+      m_is_line_buffered = line_buffered;
+      m_line_buffer.clear();
+    }
+
     /**
      * @brief   Open the PTY
      * @return  Returns \em true on success or \em false on failure
@@ -175,6 +181,22 @@ class Pty : public sigc::trackable
     ssize_t write(const void *buf, size_t count);
 
     /**
+     * @brief   Write a string to the PTY
+     * @param   str A string to write
+     * @return  On success, the number of bytes written is returned (zero
+     *          indicates nothing was written).  On error, -1 is returned,
+     *          and errno is set appropriately.
+     *
+     * Use this function to write a string to the PTY. If the slave end of the
+     * PTY is not open, the written string will just be discarded and the
+     * string length is used as the return value.
+     */
+    ssize_t write(const std::string& str)
+    {
+      return write(str.c_str(), str.size());
+    }
+
+    /**
      * @brief   Check if the PTY is open or not
      * @return  Returns \em true if the PTY has been successfully opened
      */
@@ -196,6 +218,8 @@ class Pty : public sigc::trackable
     int     	    master;
     Async::FdWatch  *watch;
     Async::Timer    pollhup_timer;
+    bool            m_is_line_buffered = false;
+    std::string     m_line_buffer;
 
     Pty(const Pty&);
     Pty& operator=(const Pty&);
