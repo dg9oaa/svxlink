@@ -166,10 +166,6 @@ bool TGHandler::switchTo(ReflectorClient *client, uint32_t tg)
       std::ostringstream ss;
       ss << "TG#" << tg;
       m_cfg->getValue(ss.str(), "AUTO_QSY_AFTER", tg_info->auto_qsy_after_s);
-      if (tg_info->auto_qsy_after_s > 0)
-      {
-        tg_info->auto_qsy_time = time(NULL) + tg_info->auto_qsy_after_s;
-      }
       m_id_map[tg] = tg_info;
     }
     tg_info->clients.insert(client);
@@ -228,12 +224,18 @@ void TGHandler::setTalkerForTG(uint32_t tg, ReflectorClient* new_talker)
   id_map_it->second->talker = new_talker;
   talkerUpdated(tg, old_talker, new_talker);
 
-  time_t now = time(NULL);
-  if ((new_talker == 0) && (tg_info->auto_qsy_time > 0) &&
-      (now > tg_info->auto_qsy_time))
+  if (tg_info->auto_qsy_after_s > 0)
   {
-    requestAutoQsy(tg_info->id);
-    tg_info->auto_qsy_time = now + tg_info->auto_qsy_after_s;
+    time_t now = time(NULL);
+    if ((new_talker == 0) && (now > tg_info->auto_qsy_time))
+    {
+      requestAutoQsy(tg_info->id);
+      tg_info->auto_qsy_time = now + tg_info->auto_qsy_after_s;
+    }
+    else if (tg_info->auto_qsy_time <= 0)
+    {
+      tg_info->auto_qsy_time = now + tg_info->auto_qsy_after_s;
+    }
   }
   //printTGStatus();
 } /* TGHandler::setTalkerForTG */
@@ -322,11 +324,10 @@ bool TGHandler::isRestricted(uint32_t tg) const
 
 void TGHandler::checkTimers(Async::Timer *t)
 {
+  struct timeval now;
+  gettimeofday(&now, NULL);
   for (IdMap::iterator it = m_id_map.begin(); it != m_id_map.end(); ++it)
   {
-    struct timeval now;
-    gettimeofday(&now, NULL);
-
     TGInfo *tg_info = it->second;
     assert(tg_info != 0);
     if (tg_info->talker != 0)
@@ -348,13 +349,6 @@ void TGHandler::checkTimers(Async::Timer *t)
         setTalkerForTG(tg_info->id, 0);
       }
     }
-
-    //if ((tg_info->auto_qsy_time > 0) &&
-    //    (now.tv_sec > tg_info->auto_qsy_time))
-    //{
-    //  requestAutoQsy(tg_info->id);
-    //  tg_info->auto_qsy_time = time(NULL) + tg_info->auto_qsy_after_s;
-    //}
   }
 } /* TGHandler::checkTimers */
 

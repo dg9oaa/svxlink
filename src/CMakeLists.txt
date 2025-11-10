@@ -1,17 +1,18 @@
 ##############################################################################
 # SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-# Copyright (C) 2003-2022 Tobias Blomberg / SM0SVX
-# 
+#
+# Copyright (C) 2003-2025 Tobias Blomberg / SM0SVX
+#
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation; either version 2 of the License, or
 # (at your option) any later version.
-# 
+#
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
@@ -20,7 +21,7 @@
 ##############################################################################
 # Project setup
 ##############################################################################
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.7...3.30)
 project(svxlink C CXX)
 #enable_testing()
 
@@ -161,6 +162,11 @@ if(NOT DEFINED SVX_SPOOL_INSTALL_DIR)
   set(SVX_SPOOL_INSTALL_DIR ${LOCAL_STATE_DIR}/spool/svxlink)
 endif(NOT DEFINED SVX_SPOOL_INSTALL_DIR)
 
+# Where to put SvxLink variable files
+if(NOT DEFINED SVX_LOCAL_STATE_DIR)
+  set(SVX_LOCAL_STATE_DIR ${LOCAL_STATE_DIR}/lib/svxlink)
+endif(NOT DEFINED SVX_LOCAL_STATE_DIR)
+
 # Where to install SvxLink architecture independent files
 if(NOT DEFINED SVX_SHARE_INSTALL_DIR)
   set(SVX_SHARE_INSTALL_DIR ${SHARE_INSTALL_PREFIX}/svxlink)
@@ -291,11 +297,11 @@ configure_file(${CMAKE_SOURCE_DIR}/config.h.in
   )
 
 # Find the Sigc++ library
-find_package(SIGC2 REQUIRED)
-include_directories(${SIGC2_INCLUDE_DIRS})
-add_definitions(${SIGC2_DEFINITIONS})
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SIGC2_CXX_FLAGS}")
-set(LIBS ${LIBS} ${SIGC2_LIBRARIES})
+find_package(SIGC REQUIRED)
+include_directories(${SIGC_INCLUDE_DIRS})
+add_definitions(${SIGC_DEFINITIONS})
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SIGC_CXX_FLAGS}")
+set(LIBS ${LIBS} ${SIGC_LIBRARIES})
 
 find_package(LADSPA)
 if(LADSPA_FOUND)
